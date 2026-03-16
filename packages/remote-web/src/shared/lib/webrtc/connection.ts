@@ -67,32 +67,36 @@ export class WebRtcConnection {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     const dc = pc.createDataChannel("relay", { ordered: true });
 
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log(
-          "[webrtc] ICE candidate:",
-          event.candidate.type,
-          event.candidate.protocol,
-          event.candidate.address,
-        );
-      } else {
-        console.log(
-          "[webrtc] ICE candidate gathering complete (null candidate)",
-        );
-      }
-    };
-
     const gatheringDone = new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
-        console.log(
-          "[webrtc] ICE gathering timed out, proceeding with current candidates",
-        );
-        resolve();
-      }, 5000);
-      pc.onicegatheringstatechange = () => {
-        if (pc.iceGatheringState === "complete") {
-          clearTimeout(timeout);
+      let resolved = false;
+      const done = () => {
+        if (!resolved) {
+          resolved = true;
           resolve();
+        }
+      };
+
+      const timeout = setTimeout(() => {
+        console.log("[webrtc] ICE gathering timed out, proceeding");
+        done();
+      }, 5000);
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          console.log(
+            "[webrtc] ICE candidate:",
+            event.candidate.type,
+            event.candidate.protocol,
+            event.candidate.address,
+          );
+          if (event.candidate.type === "srflx") {
+            clearTimeout(timeout);
+            done();
+          }
+        } else {
+          console.log("[webrtc] ICE gathering complete (null candidate)");
+          clearTimeout(timeout);
+          done();
         }
       };
     });
