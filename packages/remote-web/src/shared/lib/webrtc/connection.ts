@@ -67,11 +67,13 @@ export class WebRtcConnection {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     const dc = pc.createDataChannel("relay", { ordered: true });
 
-    const gatheringComplete = new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(
-        () => reject(new Error("ICE gathering timed out")),
-        5000,
-      );
+    const gatheringDone = new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        console.log(
+          "[webrtc] ICE gathering timed out, proceeding with current candidates",
+        );
+        resolve();
+      }, 5000);
       pc.onicegatheringstatechange = () => {
         if (pc.iceGatheringState === "complete") {
           clearTimeout(timeout);
@@ -83,8 +85,8 @@ export class WebRtcConnection {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     console.log("[webrtc] waiting for ICE gathering...");
-    await gatheringComplete;
-    console.log("[webrtc] ICE gathering complete");
+    await gatheringDone;
+    console.log("[webrtc] ICE gathering done, state:", pc.iceGatheringState);
 
     const sessionId = crypto.randomUUID();
     const offerSdp = pc.localDescription!.sdp;
