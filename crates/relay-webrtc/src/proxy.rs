@@ -1,8 +1,16 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    pin::Pin,
+    task::{Context, Poll, ready},
+};
 
 use base64::Engine as _;
+use futures_util::{Sink, Stream};
 use relay_ws::{RelayTransportMessage, RelayWsFrame, RelayWsMessageType};
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
+use tokio_tungstenite::tungstenite;
+use tokio_util::sync::PollSender;
 use ts_rs::TS;
 
 // ---------------------------------------------------------------------------
@@ -163,6 +171,66 @@ pub struct WsClose {
 pub struct WsError {
     pub conn_id: String,
     pub error: String,
+}
+
+/// Adapts a WebRTC WS connection into `Stream + Sink<tungstenite::Message>`.
+pub struct DataChannelWsStream {
+    pub conn_id: String,
+    pub frame_rx: mpsc::Receiver<WsFrame>,
+    pub poll_sender: PollSender<Vec<u8>>,
+}
+
+impl Stream for DataChannelWsStream {
+    type Item = Result<tungstenite::Message, anyhow::Error>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        match this.frame_rx.poll_recv(cx) {
+            Poll::Ready(Some(ws_frame)) => Poll::Ready(Some(ws_frame.into_transport())),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Sink<tungstenite::Message> for DataChannelWsStream {
+    type Error = anyhow::Error;
+
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let this = self.get_mut();
+        ready!(this.poll_sender.poll_reserve(cx)).map_err(|_| anyhow::anyhow!("channel closed"))?;
+        Poll::Ready(Ok(()))
+    }
+
+    fn start_send(self: Pin<&mut Self>, item: tungstenite::Message) -> Result<(), Self::Error> {
+        let this = self.get_mut();
+        let ws_frame = WsFrame::from_transport(this.conn_id.clone(), item);
+        let msg = DataChannelMessage::WsFrame(ws_frame);
+        let data = serde_json::to_vec(&msg)?;
+        this.poll_sender
+            .send_item(data)
+            .map_err(|_| anyhow::anyhow!("channel closed"))?;
+        Ok(())
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let this = self.get_mut();
+        ready!(this.poll_sender.poll_reserve(cx)).map_err(|_| anyhow::anyhow!("channel closed"))?;
+        let msg = DataChannelMessage::WsClose(WsClose {
+            conn_id: this.conn_id.clone(),
+            code: None,
+            reason: None,
+        });
+        let data = serde_json::to_vec(&msg)?;
+        this.poll_sender
+            .send_item(data)
+            .map_err(|_| anyhow::anyhow!("channel closed"))?;
+        Poll::Ready(Ok(()))
+    }
 }
 
 #[cfg(test)]

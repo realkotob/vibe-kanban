@@ -5,10 +5,12 @@
 //! - [`protocol`] — [`RelayTransportMessage`] converts between native WS messages and [`RelayWsFrame`].
 //! - [`signed`] — [`SignedWebSocket`] composes crypto + protocol over a generic stream.
 
+mod bridge;
 mod crypto;
 mod protocol;
 mod signed;
 
+pub use bridge::ws_copy_bidirectional;
 pub use crypto::{RelayWsFrame, RelayWsMessageType};
 pub use protocol::RelayTransportMessage;
 pub use signed::{

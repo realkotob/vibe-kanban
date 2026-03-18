@@ -1,20 +1,16 @@
 use std::{
     collections::HashMap,
-    pin::Pin,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    task::{Context, Poll, ready},
 };
 
 use bytes::Bytes;
-use futures_util::{Sink, Stream};
 use tokio::{
     sync::{Mutex, mpsc, oneshot},
     time::Duration,
 };
-use tokio_tungstenite::tungstenite;
 use tokio_util::sync::{CancellationToken, PollSender};
 use webrtc::{
     data_channel::{RTCDataChannel, data_channel_message::DataChannelMessage as RtcDcMessage},
@@ -31,7 +27,8 @@ use webrtc::{
 use crate::{
     fragment,
     proxy::{
-        DataChannelMessage, DataChannelRequest, DataChannelResponse, WsClose, WsFrame, WsOpen,
+        DataChannelMessage, DataChannelRequest, DataChannelResponse, DataChannelWsStream, WsClose,
+        WsFrame, WsOpen,
     },
     signaling::SdpOffer,
 };
@@ -54,11 +51,9 @@ struct PendingWsOpen {
     conn_id: String,
 }
 
-pub(crate) enum ClientCommand {
+enum ClientCommand {
     Http(PendingHttpRequest),
     WsOpen(PendingWsOpen),
-    WsFrame(Vec<u8>),
-    WsClose(Vec<u8>),
 }
 
 // ---------------------------------------------------------------------------
@@ -80,11 +75,11 @@ impl WsConnection {
 
     /// Convert into a `Stream + Sink<tungstenite::Message>` adapter for use
     /// with `ws_copy_bidirectional`.
-    pub fn into_ws_stream(self) -> WebRtcWsStream {
-        WebRtcWsStream {
+    pub fn into_ws_stream(self) -> DataChannelWsStream {
+        DataChannelWsStream {
             conn_id: self.conn_id,
             frame_rx: self.frame_rx,
-            poll_sender: PollSender::new(self.sender.cmd_tx),
+            poll_sender: PollSender::new(self.sender.dc_write_tx),
         }
     }
 }
@@ -93,15 +88,15 @@ impl WsConnection {
 #[derive(Clone)]
 pub struct WsSender {
     conn_id: String,
-    pub(crate) cmd_tx: mpsc::Sender<ClientCommand>,
+    pub(crate) dc_write_tx: mpsc::Sender<Vec<u8>>,
 }
 
 impl WsSender {
     pub async fn send(&self, frame: WsFrame) -> anyhow::Result<()> {
         let msg = DataChannelMessage::WsFrame(frame);
         let data = serde_json::to_vec(&msg)?;
-        self.cmd_tx
-            .send(ClientCommand::WsFrame(data))
+        self.dc_write_tx
+            .send(data)
             .await
             .map_err(|_| anyhow::anyhow!("Peer task has exited"))?;
         Ok(())
@@ -114,94 +109,11 @@ impl WsSender {
             reason,
         });
         let data = serde_json::to_vec(&msg)?;
-        self.cmd_tx
-            .send(ClientCommand::WsClose(data))
+        self.dc_write_tx
+            .send(data)
             .await
             .map_err(|_| anyhow::anyhow!("Peer task has exited"))?;
         Ok(())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// WebRtcWsStream — Stream + Sink<tungstenite::Message> over the data channel
-// ---------------------------------------------------------------------------
-
-/// Adapts a WebRTC WS connection into `Stream + Sink<tungstenite::Message>` for
-/// use with `ws_copy_bidirectional`.
-///
-/// Preserves WebSocket message types (text, binary, ping/pong, close) through
-/// the data channel's JSON-based [`WsFrame`] protocol.
-pub struct WebRtcWsStream {
-    conn_id: String,
-    frame_rx: mpsc::Receiver<WsFrame>,
-    poll_sender: PollSender<ClientCommand>,
-}
-
-impl Stream for WebRtcWsStream {
-    type Item = Result<tungstenite::Message, anyhow::Error>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        match this.frame_rx.poll_recv(cx) {
-            Poll::Ready(Some(ws_frame)) => Poll::Ready(Some(ws_frame.into_transport())),
-            Poll::Ready(None) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
-impl Sink<tungstenite::Message> for WebRtcWsStream {
-    type Error = anyhow::Error;
-
-    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let this = self.get_mut();
-        ready!(this.poll_sender.poll_reserve(cx)).map_err(|_| anyhow::anyhow!("channel closed"))?;
-        Poll::Ready(Ok(()))
-    }
-
-    fn start_send(self: Pin<&mut Self>, item: tungstenite::Message) -> Result<(), Self::Error> {
-        let this = self.get_mut();
-        let ws_frame = WsFrame::from_transport(this.conn_id.clone(), item);
-
-        if ws_frame.is_close() {
-            let msg = DataChannelMessage::WsClose(WsClose {
-                conn_id: this.conn_id.clone(),
-                code: None,
-                reason: None,
-            });
-            let data = serde_json::to_vec(&msg)?;
-            this.poll_sender
-                .send_item(ClientCommand::WsClose(data))
-                .map_err(|_| anyhow::anyhow!("channel closed"))?;
-            return Ok(());
-        }
-
-        let msg = DataChannelMessage::WsFrame(ws_frame);
-        let data = serde_json::to_vec(&msg)?;
-        this.poll_sender
-            .send_item(ClientCommand::WsFrame(data))
-            .map_err(|_| anyhow::anyhow!("channel closed"))?;
-        Ok(())
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let this = self.get_mut();
-        ready!(this.poll_sender.poll_reserve(cx)).map_err(|_| anyhow::anyhow!("channel closed"))?;
-
-        let msg = DataChannelMessage::WsClose(WsClose {
-            conn_id: this.conn_id.clone(),
-            code: None,
-            reason: None,
-        });
-        let data = serde_json::to_vec(&msg)?;
-        this.poll_sender
-            .send_item(ClientCommand::WsClose(data))
-            .map_err(|_| anyhow::anyhow!("channel closed"))?;
-        Poll::Ready(Ok(()))
     }
 }
 
@@ -311,6 +223,7 @@ impl WebRtcClient {
         peer_connection.set_remote_description(answer).await?;
 
         let (cmd_tx, mut cmd_rx) = mpsc::channel(64);
+        let (dc_write_tx, mut dc_write_rx) = mpsc::channel::<Vec<u8>>(64);
         let connected = Arc::new(AtomicBool::new(false));
 
         // Shared state for routing incoming messages.
@@ -318,8 +231,6 @@ impl WebRtcClient {
         let pending_ws_open: Arc<Mutex<PendingWsOpenMap>> = Arc::new(Mutex::new(HashMap::new()));
         let ws_frame_senders: Arc<Mutex<HashMap<String, mpsc::Sender<WsFrame>>>> =
             Arc::new(Mutex::new(HashMap::new()));
-
-        let ws_cmd_tx = cmd_tx.clone();
 
         // Detect ICE disconnection.
         let disconnect_token = shutdown.child_token();
@@ -415,7 +326,7 @@ impl WebRtcClient {
                             let conn = WsConnection {
                                 sender: WsSender {
                                     conn_id: opened.conn_id.clone(),
-                                    cmd_tx: ws_cmd_tx.clone(),
+                                    dc_write_tx: dc_write_tx.clone(),
                                 },
                                 conn_id: opened.conn_id,
                                 selected_protocol: opened.selected_protocol,
@@ -471,6 +382,9 @@ impl WebRtcClient {
                             &pending_http_writer,
                             &pending_ws_open_writer,
                         ).await;
+                    }
+                    Some(data) = dc_write_rx.recv() => {
+                        write_to_dc(&dc_writer, data).await;
                     }
                     _ = writer_shutdown.cancelled() => break,
                 }
@@ -627,9 +541,6 @@ async fn handle_command(
                     .result_tx
                     .send(Err("Failed to write to data channel".into()));
             }
-        }
-        ClientCommand::WsFrame(data) | ClientCommand::WsClose(data) => {
-            write_to_dc(dc, data).await;
         }
     }
 }

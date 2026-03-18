@@ -1,7 +1,6 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use bytes::Bytes;
-use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 use webrtc::{
@@ -19,8 +18,8 @@ use webrtc::{
 use crate::{
     fragment,
     proxy::{
-        DataChannelMessage, DataChannelRequest, DataChannelResponse, WsClose, WsError, WsFrame,
-        WsOpen, WsOpened,
+        DataChannelMessage, DataChannelRequest, DataChannelResponse, DataChannelWsStream, WsError,
+        WsFrame, WsOpen, WsOpened,
     },
 };
 
@@ -406,10 +405,14 @@ async fn handle_ws_open(
     });
 }
 
+// ---------------------------------------------------------------------------
+// WS bridge using ws_copy_bidirectional
+// ---------------------------------------------------------------------------
+
 async fn run_ws_bridge(
     ws_open: WsOpen,
     local_backend_addr: &str,
-    mut frame_rx: mpsc::Receiver<WsFrame>,
+    frame_rx: mpsc::Receiver<WsFrame>,
     dc_tx: &mpsc::Sender<Vec<u8>>,
 ) -> anyhow::Result<()> {
     let conn_id = ws_open.conn_id.clone();
@@ -447,64 +450,17 @@ async fn run_ws_bridge(
         dc_tx.send(json).await.ok();
     }
 
-    let (mut ws_sender, mut ws_receiver) = ws_stream.split();
+    let bridge = DataChannelWsStream {
+        conn_id,
+        frame_rx,
+        poll_sender: tokio_util::sync::PollSender::new(dc_tx.clone()),
+    };
 
-    // Local WS → data channel
-    let conn_id_up = conn_id.clone();
-    let dc_tx_up = dc_tx.clone();
-    let upstream_to_dc = tokio::spawn(async move {
-        while let Some(msg_result) = ws_receiver.next().await {
-            let msg = match msg_result {
-                Ok(m) => m,
-                Err(_) => break,
-            };
-
-            let ws_frame = WsFrame::from_transport(conn_id_up.clone(), msg);
-            let is_close = ws_frame.is_close();
-            let frame_msg = DataChannelMessage::WsFrame(ws_frame);
-            if let Ok(json) = serde_json::to_vec(&frame_msg)
-                && dc_tx_up.send(json).await.is_err()
-            {
-                break;
-            }
-
-            if is_close {
-                break;
-            }
-        }
-
-        let close_msg = DataChannelMessage::WsClose(WsClose {
-            conn_id: conn_id_up.clone(),
-            code: None,
-            reason: None,
-        });
-        if let Ok(json) = serde_json::to_vec(&close_msg) {
-            let _ = dc_tx_up.send(json).await;
-        }
-    });
-
-    // Data channel → local WS
-    let dc_to_upstream = tokio::spawn(async move {
-        while let Some(frame) = frame_rx.recv().await {
-            let is_close = frame.is_close();
-            let msg: tokio_tungstenite::tungstenite::Message = match frame.into_transport() {
-                Ok(m) => m,
-                Err(_) => break,
-            };
-            if ws_sender.send(msg).await.is_err() {
-                break;
-            }
-            if is_close {
-                break;
-            }
-        }
-        let _ = ws_sender.close().await;
-    });
-
-    tokio::select! {
-        _ = upstream_to_dc => {}
-        _ = dc_to_upstream => {}
-    }
-
-    Ok(())
+    relay_ws::ws_copy_bidirectional(
+        ws_stream,
+        bridge,
+        std::convert::identity,
+        std::convert::identity,
+    )
+    .await
 }

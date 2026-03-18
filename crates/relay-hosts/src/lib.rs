@@ -9,7 +9,7 @@ pub use relay_client::RelayApiError;
 use relay_client::{RelayApiClient, RelayHostIdentity, RelayHostTransport};
 use relay_control::signing::RelaySigningService;
 use relay_types::{PairRelayHostRequest, RelayAuthState, RelayPairedHost, RemoteSession};
-use relay_webrtc::{WebRtcClient, WebRtcWsStream};
+use relay_webrtc::{DataChannelWsStream, WebRtcClient};
 use relay_ws::SignedTungsteniteSocket;
 use remote_info::RemoteInfo;
 use serde::{Deserialize, Serialize};
@@ -245,7 +245,7 @@ pub struct ProxiedWsConnection {
 /// data channel.
 pub enum UpstreamWs {
     Relay(SignedTungsteniteSocket),
-    WebRtc(WebRtcWsStream),
+    WebRtc(DataChannelWsStream),
 }
 
 #[derive(Debug, thiserror::Error)]

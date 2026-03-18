@@ -41,6 +41,7 @@ tokio = { version = "1.0", features = ["full"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tokio-yamux = "0.3.17"
+relay-ws = { path = "../relay-ws" }
 tracing = "0.1.43"
 
 # Optional deps for the relay-server binary

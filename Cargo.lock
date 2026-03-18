@@ -6613,6 +6613,7 @@ dependencies = [
  "http",
  "hyper",
  "hyper-util",
+ "relay-ws",
  "rustls",
  "tokio",
  "tokio-tungstenite 0.26.2",
