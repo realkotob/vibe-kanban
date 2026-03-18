@@ -552,7 +552,7 @@ export function ChangesPanelContainer({
         >
           <input
             ref={searchInputRef}
-            type="text"
+            type="search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search diffs"
