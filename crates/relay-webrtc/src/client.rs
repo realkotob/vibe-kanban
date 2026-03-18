@@ -43,6 +43,7 @@ type PendingWsOpenMap = HashMap<String, oneshot::Sender<Result<WsConnection, Str
 struct PendingHttpRequest {
     data: Vec<u8>,
     response_tx: oneshot::Sender<DataChannelResponse>,
+    request_id: String,
 }
 
 struct PendingWsOpen {
@@ -421,7 +422,7 @@ impl WebRtcClient {
         });
 
         let request = DataChannelRequest {
-            id: request_id,
+            id: request_id.clone(),
             method: method.to_string(),
             path: path.to_string(),
             headers,
@@ -436,6 +437,7 @@ impl WebRtcClient {
             .send(ClientCommand::Http(PendingHttpRequest {
                 data,
                 response_tx,
+                request_id: request_id.clone(),
             }))
             .await
             .map_err(|_| anyhow::anyhow!("Peer task has exited"))?;
@@ -506,21 +508,18 @@ async fn handle_command(
 ) {
     match cmd {
         ClientCommand::Http(req) => {
-            let parsed = serde_json::from_slice::<DataChannelMessage>(&req.data).ok();
             tracing::trace!(
                 bytes = req.data.len(),
                 "[client-peer] writing HTTP request to data channel"
             );
             if write_to_dc(dc, req.data).await {
-                if let Some(DataChannelMessage::HttpRequest(r)) = parsed {
-                    let mut pending = pending_http.lock().await;
-                    tracing::trace!(
-                        id = %r.id,
-                        pending = pending.len() + 1,
-                        "[client-peer] request queued"
-                    );
-                    pending.insert(r.id, req.response_tx);
-                }
+                let mut pending = pending_http.lock().await;
+                tracing::trace!(
+                    id = %req.request_id,
+                    pending = pending.len() + 1,
+                    "[client-peer] request queued"
+                );
+                pending.insert(req.request_id, req.response_tx);
             } else {
                 let _ = req.response_tx.send(DataChannelResponse {
                     id: String::new(),

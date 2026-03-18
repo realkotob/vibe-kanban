@@ -10,9 +10,7 @@ use axum::{
     routing::any,
 };
 use deployment::Deployment;
-use relay_hosts::{
-    DirectProxyResponse, ProxiedResponse, ProxiedWsConnection, UpstreamWs,
-};
+use relay_hosts::{DirectProxyResponse, ProxiedResponse, ProxiedWsConnection, UpstreamWs};
 use relay_tunnel::ws_io::ws_copy_bidirectional;
 use uuid::Uuid;
 
