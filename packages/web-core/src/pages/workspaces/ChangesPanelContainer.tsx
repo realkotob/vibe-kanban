@@ -403,7 +403,7 @@ export function ChangesPanelContainer({
       if (rafId) cancelAnimationFrame(rafId);
       clearSearchTextHighlightsWithKey(root, DIFFS_HIGHLIGHT_KEY);
     };
-  }, [showSearch, searchQuery, diffItems, currentMatchIdx]);
+  }, [showSearch, searchQuery, diffItems]);
 
   const indexToPath = useCallback(
     (index: number): string | null => {
