@@ -16,9 +16,9 @@ import {
   applySearchTextHighlights,
   clearSearchTextHighlightsWithKey,
 } from '@/shared/lib/searchTextHighlight';
+import { usePanelFindShortcut } from '@/shared/hooks/usePanelFindShortcut';
 
 const DIFFS_HIGHLIGHT_KEY = 'vk-search-highlight-diffs';
-const PANEL_FIND_EVENT = 'vk-open-panel-find';
 
 // Auto-collapse defaults based on change type (matches DiffsPanel behavior)
 const COLLAPSE_BY_CHANGE_TYPE: Record<DiffChangeKind, boolean> = {
@@ -126,7 +126,6 @@ export function ChangesPanelContainer({
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentMatchIdx, setCurrentMatchIdx] = useState(0);
-  const openedFromPanelRef = useRef<'conversation' | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -244,125 +243,21 @@ export function ChangesPanelContainer({
     });
   }, []);
 
-  useEffect(() => {
-    if (!showSearch) return;
-    focusSearchInput();
-  }, [focusSearchInput, showSearch]);
-
   const closeSearchState = useCallback(() => {
-    openedFromPanelRef.current = null;
     setShowSearch(false);
     setSearchQuery('');
     setCurrentMatchIdx(0);
   }, []);
 
-  const closeConversationSearchIfOpen = useCallback(() => {
-    const conversationPanel = document.querySelector<HTMLElement>(
-      '[data-vk-search-panel="conversation"]'
-    );
-    if (
-      !conversationPanel ||
-      conversationPanel.dataset.vkSearchOpen !== 'true'
-    ) {
-      return;
-    }
-    window.dispatchEvent(
-      new CustomEvent(PANEL_FIND_EVENT, {
-        detail: { panel: 'conversation' as const, action: 'close' as const },
-      })
-    );
-  }, []);
-
-  const tryOpenConversationSearch = useCallback((): boolean => {
-    const conversationPanel = document.querySelector<HTMLElement>(
-      '[data-vk-search-panel="conversation"]'
-    );
-    if (!conversationPanel) return false;
-    if (conversationPanel.dataset.vkSearchOpen === 'true') return false;
-
-    closeSearchState();
-    window.dispatchEvent(
-      new CustomEvent(PANEL_FIND_EVENT, {
-        detail: {
-          panel: 'conversation' as const,
-          action: 'open' as const,
-          from: 'diffs' as const,
-        },
-      })
-    );
-    return true;
-  }, [closeSearchState]);
-
-  useEffect(() => {
-    const handleOpenPanelFind = (event: Event) => {
-      const customEvent = event as CustomEvent<{
-        panel?: 'conversation' | 'diffs';
-        action?: 'open' | 'close';
-        from?: 'conversation' | 'diffs';
-      }>;
-      if (customEvent.detail?.panel !== 'diffs') return;
-      if (customEvent.detail?.action === 'close') {
-        openedFromPanelRef.current = null;
-        closeSearchState();
-        return;
-      }
-      if (showSearch) return;
-      openedFromPanelRef.current =
-        customEvent.detail?.from === 'conversation' ? 'conversation' : null;
-      setShowSearch(true);
-      focusSearchInput();
-    };
-
-    window.addEventListener(PANEL_FIND_EVENT, handleOpenPanelFind);
-    return () => {
-      window.removeEventListener(PANEL_FIND_EVENT, handleOpenPanelFind);
-    };
-  }, [closeSearchState, focusSearchInput, showSearch]);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const isFindShortcut =
-        (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f';
-      if (!isFindShortcut) return;
-
-      const target = event.target as Node | null;
-      if (!panelRef.current || !target || !panelRef.current.contains(target)) {
-        return;
-      }
-
-      if (showSearch) {
-        if (openedFromPanelRef.current === 'conversation') {
-          openedFromPanelRef.current = null;
-          closeSearchState();
-          return;
-        }
-        if (tryOpenConversationSearch()) {
-          event.preventDefault();
-          return;
-        }
-        // Final step: close in-panel search and let browser find handle it.
-        closeSearchState();
-        return;
-      }
-
-      event.preventDefault();
-      openedFromPanelRef.current = null;
-      closeConversationSearchIfOpen();
-      setShowSearch(true);
-      focusSearchInput();
-    };
-
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown, true);
-    };
-  }, [
-    closeConversationSearchIfOpen,
-    closeSearchState,
-    focusSearchInput,
+  usePanelFindShortcut({
+    panel: 'diffs',
+    otherPanel: 'conversation',
+    panelRef,
     showSearch,
-    tryOpenConversationSearch,
-  ]);
+    setShowSearch,
+    focusSearchInput,
+    closeSearchState,
+  });
 
   useEffect(() => {
     const root = panelRef.current;
