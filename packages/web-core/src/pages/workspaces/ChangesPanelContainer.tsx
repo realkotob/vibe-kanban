@@ -18,6 +18,7 @@ import {
 } from '@/shared/lib/searchTextHighlight';
 
 const DIFFS_HIGHLIGHT_KEY = 'vk-search-highlight-diffs';
+const PANEL_FIND_EVENT = 'vk-open-panel-find';
 
 // Auto-collapse defaults based on change type (matches DiffsPanel behavior)
 const COLLAPSE_BY_CHANGE_TYPE: Record<DiffChangeKind, boolean> = {
@@ -232,6 +233,41 @@ export function ChangesPanelContainer({
     panelRef.current?.focus({ preventScroll: true });
   }, []);
 
+  const tryOpenConversationSearch = useCallback((): boolean => {
+    const conversationPanel = document.querySelector<HTMLElement>(
+      '[data-vk-search-panel="conversation"]'
+    );
+    if (!conversationPanel) return false;
+    if (conversationPanel.dataset.vkSearchOpen === 'true') return false;
+
+    window.dispatchEvent(
+      new CustomEvent(PANEL_FIND_EVENT, {
+        detail: { panel: 'conversation' as const, from: 'diffs' as const },
+      })
+    );
+    return true;
+  }, []);
+
+  useEffect(() => {
+    const handleOpenPanelFind = (event: Event) => {
+      const customEvent = event as CustomEvent<{
+        panel?: 'conversation' | 'diffs';
+      }>;
+      if (customEvent.detail?.panel !== 'diffs') return;
+      if (showSearch) return;
+      setShowSearch(true);
+      requestAnimationFrame(() => {
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      });
+    };
+
+    window.addEventListener(PANEL_FIND_EVENT, handleOpenPanelFind);
+    return () => {
+      window.removeEventListener(PANEL_FIND_EVENT, handleOpenPanelFind);
+    };
+  }, [showSearch]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const isFindShortcut =
@@ -244,7 +280,11 @@ export function ChangesPanelContainer({
       }
 
       if (showSearch) {
-        // Let the browser handle Cmd/Ctrl+F on the second press.
+        if (tryOpenConversationSearch()) {
+          event.preventDefault();
+          return;
+        }
+        // If both panel searches are already open, let browser find handle it.
         return;
       }
 
@@ -260,7 +300,7 @@ export function ChangesPanelContainer({
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [showSearch]);
+  }, [showSearch, tryOpenConversationSearch]);
 
   useEffect(() => {
     const root = panelRef.current;
@@ -535,6 +575,8 @@ export function ChangesPanelContainer({
   return (
     <div
       ref={panelRef}
+      data-vk-search-panel="diffs"
+      data-vk-search-open={showSearch ? 'true' : 'false'}
       tabIndex={-1}
       onMouseDown={(event) => {
         const target = event.target as HTMLElement;
