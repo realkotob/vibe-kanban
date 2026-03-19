@@ -184,7 +184,11 @@ export function ChangesPanelContainer({
     setCurrentMatchIdx(0);
   }, [currentMatchIdx, matchIndices.length]);
 
-  const currentMatchIndex = matchIndices[currentMatchIdx] ?? null;
+  const activeMatchIdx =
+    matchIndices.length === 0
+      ? 0
+      : Math.min(currentMatchIdx, matchIndices.length - 1);
+  const currentMatchIndex = matchIndices[activeMatchIdx] ?? null;
 
   useEffect(() => {
     if (currentMatchIndex === null) return;
@@ -617,7 +621,7 @@ export function ChangesPanelContainer({
           <>
             <span className="w-12 text-right text-xs text-low whitespace-nowrap">
               {matchIndices.length > 0
-                ? `${currentMatchIdx + 1}/${matchIndices.length}`
+                ? `${activeMatchIdx + 1}/${matchIndices.length}`
                 : '0/0'}
             </span>
             <button
