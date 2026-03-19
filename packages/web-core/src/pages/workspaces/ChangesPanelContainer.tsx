@@ -232,6 +232,18 @@ export function ChangesPanelContainer({
     panelRef.current?.focus({ preventScroll: true });
   }, []);
 
+  const focusSearchInput = useCallback(() => {
+    requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!showSearch) return;
+    focusSearchInput();
+  }, [focusSearchInput, showSearch]);
+
   const closeSearchState = useCallback(() => {
     setShowSearch(false);
     setSearchQuery('');
@@ -288,17 +300,14 @@ export function ChangesPanelContainer({
       }
       if (showSearch) return;
       setShowSearch(true);
-      requestAnimationFrame(() => {
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      });
+      focusSearchInput();
     };
 
     window.addEventListener(PANEL_FIND_EVENT, handleOpenPanelFind);
     return () => {
       window.removeEventListener(PANEL_FIND_EVENT, handleOpenPanelFind);
     };
-  }, [closeSearchState, showSearch]);
+  }, [closeSearchState, focusSearchInput, showSearch]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -324,10 +333,7 @@ export function ChangesPanelContainer({
       event.preventDefault();
       closeConversationSearchIfOpen();
       setShowSearch(true);
-      requestAnimationFrame(() => {
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      });
+      focusSearchInput();
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
@@ -337,6 +343,7 @@ export function ChangesPanelContainer({
   }, [
     closeConversationSearchIfOpen,
     closeSearchState,
+    focusSearchInput,
     showSearch,
     tryOpenConversationSearch,
   ]);
