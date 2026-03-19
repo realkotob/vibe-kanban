@@ -82,12 +82,16 @@ const PersistedDiffItem = memo(function PersistedDiffItem({
     initialExpanded
   );
   const effectiveExpanded = forceExpand || expanded;
+  const handleToggle = useCallback(() => {
+    if (forceExpand) return;
+    toggle();
+  }, [forceExpand, toggle]);
 
   return (
     <PierreDiffCard
       diff={diff}
       expanded={effectiveExpanded}
-      onToggle={toggle}
+      onToggle={handleToggle}
       workspaceId={workspaceId}
       className={
         isMatched
@@ -122,6 +126,7 @@ export function ChangesPanelContainer({
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentMatchIdx, setCurrentMatchIdx] = useState(0);
+  const openedFromPanelRef = useRef<'conversation' | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -195,7 +200,7 @@ export function ChangesPanelContainer({
     changesPanelRef.current?.scrollToIndex(currentMatchIndex, {
       align: 'center',
     });
-  }, [currentMatchIndex]);
+  }, [currentMatchIndex, searchQuery]);
 
   const matchedPathSet = useMemo(() => {
     const set = new Set<string>();
@@ -245,6 +250,7 @@ export function ChangesPanelContainer({
   }, [focusSearchInput, showSearch]);
 
   const closeSearchState = useCallback(() => {
+    openedFromPanelRef.current = null;
     setShowSearch(false);
     setSearchQuery('');
     setCurrentMatchIdx(0);
@@ -292,13 +298,17 @@ export function ChangesPanelContainer({
       const customEvent = event as CustomEvent<{
         panel?: 'conversation' | 'diffs';
         action?: 'open' | 'close';
+        from?: 'conversation' | 'diffs';
       }>;
       if (customEvent.detail?.panel !== 'diffs') return;
       if (customEvent.detail?.action === 'close') {
+        openedFromPanelRef.current = null;
         closeSearchState();
         return;
       }
       if (showSearch) return;
+      openedFromPanelRef.current =
+        customEvent.detail?.from === 'conversation' ? 'conversation' : null;
       setShowSearch(true);
       focusSearchInput();
     };
@@ -321,6 +331,11 @@ export function ChangesPanelContainer({
       }
 
       if (showSearch) {
+        if (openedFromPanelRef.current === 'conversation') {
+          openedFromPanelRef.current = null;
+          closeSearchState();
+          return;
+        }
         if (tryOpenConversationSearch()) {
           event.preventDefault();
           return;
@@ -331,6 +346,7 @@ export function ChangesPanelContainer({
       }
 
       event.preventDefault();
+      openedFromPanelRef.current = null;
       closeConversationSearchIfOpen();
       setShowSearch(true);
       focusSearchInput();
