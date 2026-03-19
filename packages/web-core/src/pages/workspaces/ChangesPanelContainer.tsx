@@ -232,6 +232,29 @@ export function ChangesPanelContainer({
     panelRef.current?.focus({ preventScroll: true });
   }, []);
 
+  const closeSearchState = useCallback(() => {
+    setShowSearch(false);
+    setSearchQuery('');
+    setCurrentMatchIdx(0);
+  }, []);
+
+  const closeConversationSearchIfOpen = useCallback(() => {
+    const conversationPanel = document.querySelector<HTMLElement>(
+      '[data-vk-search-panel="conversation"]'
+    );
+    if (
+      !conversationPanel ||
+      conversationPanel.dataset.vkSearchOpen !== 'true'
+    ) {
+      return;
+    }
+    window.dispatchEvent(
+      new CustomEvent(PANEL_FIND_EVENT, {
+        detail: { panel: 'conversation' as const, action: 'close' as const },
+      })
+    );
+  }, []);
+
   const tryOpenConversationSearch = useCallback((): boolean => {
     const conversationPanel = document.querySelector<HTMLElement>(
       '[data-vk-search-panel="conversation"]'
@@ -239,20 +262,30 @@ export function ChangesPanelContainer({
     if (!conversationPanel) return false;
     if (conversationPanel.dataset.vkSearchOpen === 'true') return false;
 
+    closeSearchState();
     window.dispatchEvent(
       new CustomEvent(PANEL_FIND_EVENT, {
-        detail: { panel: 'conversation' as const, from: 'diffs' as const },
+        detail: {
+          panel: 'conversation' as const,
+          action: 'open' as const,
+          from: 'diffs' as const,
+        },
       })
     );
     return true;
-  }, []);
+  }, [closeSearchState]);
 
   useEffect(() => {
     const handleOpenPanelFind = (event: Event) => {
       const customEvent = event as CustomEvent<{
         panel?: 'conversation' | 'diffs';
+        action?: 'open' | 'close';
       }>;
       if (customEvent.detail?.panel !== 'diffs') return;
+      if (customEvent.detail?.action === 'close') {
+        closeSearchState();
+        return;
+      }
       if (showSearch) return;
       setShowSearch(true);
       requestAnimationFrame(() => {
@@ -265,7 +298,7 @@ export function ChangesPanelContainer({
     return () => {
       window.removeEventListener(PANEL_FIND_EVENT, handleOpenPanelFind);
     };
-  }, [showSearch]);
+  }, [closeSearchState, showSearch]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -283,11 +316,13 @@ export function ChangesPanelContainer({
           event.preventDefault();
           return;
         }
-        // If both panel searches are already open, let browser find handle it.
+        // Final step: close in-panel search and let browser find handle it.
+        closeSearchState();
         return;
       }
 
       event.preventDefault();
+      closeConversationSearchIfOpen();
       setShowSearch(true);
       requestAnimationFrame(() => {
         searchInputRef.current?.focus();
@@ -299,7 +334,12 @@ export function ChangesPanelContainer({
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [showSearch, tryOpenConversationSearch]);
+  }, [
+    closeConversationSearchIfOpen,
+    closeSearchState,
+    showSearch,
+    tryOpenConversationSearch,
+  ]);
 
   useEffect(() => {
     const root = panelRef.current;
