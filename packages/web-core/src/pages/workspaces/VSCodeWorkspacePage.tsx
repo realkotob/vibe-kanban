@@ -8,10 +8,8 @@ import { AppWithStyleOverride } from '@/shared/lib/StyleOverride';
 import { useStyleOverrideThemeSetter } from '@/shared/lib/StyleOverride';
 import { WebviewContextMenu } from '@/integrations/vscode/ContextMenu';
 import { ArrowDownIcon } from '@phosphor-icons/react';
-import {
-  useWorkspaceContext,
-  useWorkspaceDiffContext,
-} from '@/shared/hooks/useWorkspaceContext';
+import { useWorkspaceContext } from '@/shared/hooks/useWorkspaceContext';
+import { useDiffStats } from '@/shared/stores/useWorkspaceDiffStore';
 import { usePageTitle } from '@/shared/hooks/usePageTitle';
 import { SessionChatBoxContainer } from '@/features/workspace-chat/ui/SessionChatBoxContainer';
 import {
@@ -44,7 +42,7 @@ function VSCodeChatBox({
   onScrollToPreviousMessage: () => void;
   onScrollToBottom: (behavior?: 'auto' | 'smooth') => void;
 }) {
-  const { diffStats } = useWorkspaceDiffContext();
+  const diffStats = useDiffStats();
 
   return (
     <SessionChatBoxContainer

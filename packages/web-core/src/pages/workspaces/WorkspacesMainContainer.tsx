@@ -21,7 +21,7 @@ import { MessageEditProvider } from '@/features/workspace-chat/model/contexts/Me
 import { RetryUiProvider } from '@/features/workspace-chat/model/contexts/RetryUiContext';
 import { ApprovalFeedbackProvider } from '@/features/workspace-chat/model/contexts/ApprovalFeedbackContext';
 import { forwardWheelToScroller } from '@/features/workspace-chat/ui/forwardWheelToScroller';
-import { useWorkspaceDiffContext } from '@/shared/hooks/useWorkspaceContext';
+import { useDiffStats } from '@/shared/stores/useWorkspaceDiffStore';
 
 /**
  * Isolated component that reads diffStats from WorkspaceContext.
@@ -48,7 +48,7 @@ function ChatBoxWithDiffStats({
   onScrollToPreviousMessage: () => void;
   onScrollToBottom: (behavior?: 'auto' | 'smooth') => void;
 }) {
-  const { diffStats } = useWorkspaceDiffContext();
+  const diffStats = useDiffStats();
 
   return (
     <SessionChatBoxContainer
