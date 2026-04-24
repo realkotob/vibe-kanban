@@ -17,7 +17,6 @@ pub mod execution_processes;
 pub mod frontend;
 pub mod health;
 pub mod host_relay;
-pub mod migration;
 pub mod oauth;
 pub mod organizations;
 pub mod preview;
@@ -31,6 +30,7 @@ pub mod sessions;
 pub mod ssh_session;
 pub mod tags;
 pub mod terminal;
+pub mod webrtc;
 pub mod workspaces;
 
 pub fn router(deployment: DeploymentImpl) -> IntoMakeService<Router> {
@@ -51,11 +51,11 @@ pub fn router(deployment: DeploymentImpl) -> IntoMakeService<Router> {
         .merge(search::router(&deployment))
         .merge(preview::api_router())
         .merge(releases::router())
-        .merge(migration::router())
         .merge(sessions::router(&deployment))
         .merge(terminal::router())
         .route("/ssh-session", get(ssh_session::ssh_session_ws))
         .nest("/remote", remote::router())
+        .merge(webrtc::router())
         .nest("/attachments", attachments::routes())
         .layer(axum::middleware::from_fn_with_state(
             deployment.clone(),
